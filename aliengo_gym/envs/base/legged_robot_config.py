@@ -33,6 +33,18 @@ class Cfg(PrefixProto, cli=False):
         recording_height_px = 240
         recording_mode = "COLOR"
         num_recording_envs = 1
+        front_camera_enabled = False
+        front_camera_attach_body_name = "trunk"
+        front_camera_offset_xyz = [0.27, 0.0, 0.03]
+        front_camera_pitch_deg = 0.0
+        # Depth FOV target: 86 x 57 (H x V)
+        front_camera_depth_width_px = 640
+        front_camera_depth_height_px = 424
+        front_camera_depth_fov_h_deg = 86.0
+        # Color FOV target: 70 x 43 x 77 (H x V x D)
+        front_camera_color_width_px = 640
+        front_camera_color_height_px = 394
+        front_camera_color_fov_h_deg = 70.0
         debug_viz = False
         all_agents_share = False
 

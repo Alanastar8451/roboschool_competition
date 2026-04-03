@@ -20,7 +20,12 @@ def controller(args):
         load_run=args.load_run,
         checkpoint=args.checkpoint,
     )
-    run(robot, steps=args.steps)
+    run(
+        robot,
+        steps=args.steps,
+        render_camera=args.render_camera,
+        camera_depth_max_m=args.camera_depth_max_m,
+    )
 
 
 if __name__ == "__main__":

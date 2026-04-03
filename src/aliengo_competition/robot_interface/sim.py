@@ -19,7 +19,18 @@ class SimAliengoRobot(AliengoRobotInterface):
     CMD_VX = 0
     CMD_VY = 1
     CMD_VW = 2
+    CMD_BODY_HEIGHT = 3
+    CMD_GAIT_FREQUENCY = 4
+    CMD_GAIT_PHASE = 5
+    CMD_GAIT_OFFSET = 6
+    CMD_GAIT_BOUND = 7
+    CMD_GAIT_DURATION = 8
+    CMD_FOOTSWING_HEIGHT = 9
     CMD_BODY_PITCH = 10
+    CMD_BODY_ROLL = 11
+    CMD_STANCE_WIDTH = 12
+    CMD_STANCE_LENGTH = 13
+    CMD_AUX_REWARD = 14
 
     def __init__(self, env, policy):
         self.env = env
@@ -43,8 +54,37 @@ class SimAliengoRobot(AliengoRobotInterface):
 
     def _refresh_command_template(self) -> None:
         base_env = self._unwrap_env()
-        if hasattr(base_env, "commands"):
-            self._command_template = base_env.commands[0].detach().clone()
+        template = None
+        default_command = getattr(base_env, "default_command", None)
+        if torch.is_tensor(default_command):
+            template = default_command.detach().clone()
+        elif hasattr(base_env, "commands") and torch.is_tensor(base_env.commands):
+            template = base_env.commands[0].detach().clone()
+
+        if template is None:
+            self._command_template = None
+            return
+
+        # Keep trot command deterministic across runs. Only vx/vy/vw and pitch
+        # are controlled externally by the main controller.
+        fixed_values = {
+            self.CMD_BODY_HEIGHT: 0.0,
+            self.CMD_GAIT_FREQUENCY: 3.0,
+            self.CMD_GAIT_PHASE: 0.5,
+            self.CMD_GAIT_OFFSET: 0.0,
+            self.CMD_GAIT_BOUND: 0.0,
+            self.CMD_GAIT_DURATION: 0.5,
+            self.CMD_FOOTSWING_HEIGHT: 0.08,
+            self.CMD_BODY_ROLL: 0.0,
+            self.CMD_STANCE_WIDTH: 0.25,
+            self.CMD_STANCE_LENGTH: 0.45,
+            self.CMD_AUX_REWARD: 0.0,
+        }
+        for index, value in fixed_values.items():
+            if template.shape[0] > index:
+                template[index] = float(value)
+
+        self._command_template = template
 
     def _apply_command(self) -> None:
         if hasattr(self.env, "set_command"):
@@ -117,6 +157,10 @@ class SimAliengoRobot(AliengoRobotInterface):
         return obs, reward, done, info
 
     def get_camera(self):
+        base_env = self._unwrap_env()
+        camera_getter = getattr(base_env, "get_front_camera_data", None)
+        if callable(camera_getter):
+            return camera_getter(env_id=0)
         return None
 
     def get_observation(self):

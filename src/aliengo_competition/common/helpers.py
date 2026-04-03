@@ -110,6 +110,8 @@ def get_args():
         {"name": "--vw", "type": float, "default": 0.0, "help": "Target yaw rate."},
         {"name": "--pitch", "type": float, "default": 0.0, "help": "Target body pitch."},
         {"name": "--steps", "type": int, "default": 1000, "help": "Steps for play/controller demos."},
+        {"name": "--render_camera", "action": "store_true", "default": False, "help": "Render front RGB+Depth camera stream (Intel RealSense D435 emulation)."},
+        {"name": "--camera_depth_max_m", "type": float, "default": 10.0, "help": "Depth visualization max range in meters for camera rendering."},
         {"name": "--resume", "action": "store_true", "default": False, "help": "Resume training from a checkpoint."},
         {"name": "--experiment_name", "type": str, "help": "Experiment name override."},
         {"name": "--run_name", "type": str, "help": "Run name override."},

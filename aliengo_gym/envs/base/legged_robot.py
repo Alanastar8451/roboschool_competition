@@ -1,5 +1,6 @@
 # License: see [LICENSE, LICENSES/legged_gym/LICENSE]
 
+import math
 import os
 from typing import Dict
 
@@ -7,6 +8,7 @@ from isaacgym import gymtorch, gymapi, gymutil
 from isaacgym.torch_utils import *
 
 assert gymtorch
+import numpy as np
 import torch
 
 from aliengo_gym import MINI_GYM_ROOT_DIR
@@ -944,7 +946,8 @@ class LeggedRobot(BaseTask):
             raise NameError(f"Unknown controller type: {control_type}")
 
         torques = torques * self.motor_strengths
-        return torch.clip(torques, -self.torque_limits, self.torque_limits)
+        torque_limits = self.torque_limits.unsqueeze(0)
+        return torch.max(torch.min(torques, torque_limits), -torque_limits)
 
     def _reset_dofs(self, env_ids, cfg):
         """ Resets DOF position and velocities of selected environmments
@@ -1365,8 +1368,8 @@ class LeggedRobot(BaseTask):
             for curriculum in self.curricula:
                 curriculum.set_params(lipschitz_threshold=self.cfg.commands.lipschitz_threshold,
                                       binary_phases=self.cfg.commands.binary_phases)
-        self.env_command_bins = np.zeros(len(env_ids), dtype=np.int)
-        self.env_command_categories = np.zeros(len(env_ids), dtype=np.int)
+        self.env_command_bins = np.zeros(len(env_ids), dtype=int)
+        self.env_command_categories = np.zeros(len(env_ids), dtype=int)
         low = np.array(
             [self.cfg.commands.lin_vel_x[0], self.cfg.commands.lin_vel_y[0],
              self.cfg.commands.ang_vel_yaw[0], self.cfg.commands.body_height_cmd[0],
@@ -1547,12 +1550,52 @@ class LeggedRobot(BaseTask):
         self.actor_handles = []
         self.imu_sensor_handles = []
         self.envs = []
+        self.front_camera_enabled = bool(getattr(self.cfg.env, "front_camera_enabled", False))
+        self.front_camera_color_handles = []
+        self.front_camera_depth_handles = []
+        self.front_camera_color_props = None
+        self.front_camera_depth_props = None
+        self.front_camera_attach_body_name = str(getattr(self.cfg.env, "front_camera_attach_body_name", "trunk"))
+        self.front_camera_local_transform = None
 
         self.default_friction = rigid_shape_props_asset[1].friction
         self.default_restitution = rigid_shape_props_asset[1].restitution
         self._init_custom_buffers__()
         self._call_train_eval(self._randomize_rigid_body_props, torch.arange(self.num_envs, device=self.device))
         self._randomize_gravity()
+
+        if self.front_camera_enabled:
+            if self.front_camera_attach_body_name not in body_names:
+                fallback_body_name = "base" if "base" in body_names else body_names[0]
+                print(
+                    f"[FrontCamera] body '{self.front_camera_attach_body_name}' not found in asset; "
+                    f"falling back to '{fallback_body_name}'."
+                )
+                self.front_camera_attach_body_name = fallback_body_name
+
+            self.front_camera_color_props = gymapi.CameraProperties()
+            self.front_camera_color_props.width = int(getattr(self.cfg.env, "front_camera_color_width_px", 640))
+            self.front_camera_color_props.height = int(getattr(self.cfg.env, "front_camera_color_height_px", 394))
+            self.front_camera_color_props.horizontal_fov = float(
+                getattr(self.cfg.env, "front_camera_color_fov_h_deg", 70.0)
+            )
+
+            self.front_camera_depth_props = gymapi.CameraProperties()
+            self.front_camera_depth_props.width = int(getattr(self.cfg.env, "front_camera_depth_width_px", 640))
+            self.front_camera_depth_props.height = int(getattr(self.cfg.env, "front_camera_depth_height_px", 424))
+            self.front_camera_depth_props.horizontal_fov = float(
+                getattr(self.cfg.env, "front_camera_depth_fov_h_deg", 86.0)
+            )
+
+            camera_offset = getattr(self.cfg.env, "front_camera_offset_xyz", [0.27, 0.0, 0.03])
+            camera_pitch = float(getattr(self.cfg.env, "front_camera_pitch_deg", 0.0))
+            self.front_camera_local_transform = gymapi.Transform()
+            self.front_camera_local_transform.p = gymapi.Vec3(
+                float(camera_offset[0]), float(camera_offset[1]), float(camera_offset[2])
+            )
+            self.front_camera_local_transform.r = gymapi.Quat.from_axis_angle(
+                gymapi.Vec3(1.0, 0.0, 0.0), math.radians(camera_pitch)
+            )
 
         for i in range(self.num_envs):
             # create env instance
@@ -1573,6 +1616,35 @@ class LeggedRobot(BaseTask):
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, anymal_handle)
             body_props = self._process_rigid_body_props(body_props, i)
             self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
+
+            if self.front_camera_enabled:
+                camera_body_handle = self.gym.find_actor_rigid_body_handle(
+                    env_handle, anymal_handle, self.front_camera_attach_body_name
+                )
+                if camera_body_handle == gymapi.INVALID_HANDLE:
+                    # Keep controller running even if the requested body is
+                    # unavailable in a specific asset variation.
+                    continue
+
+                color_camera_handle = self.gym.create_camera_sensor(env_handle, self.front_camera_color_props)
+                depth_camera_handle = self.gym.create_camera_sensor(env_handle, self.front_camera_depth_props)
+                self.gym.attach_camera_to_body(
+                    color_camera_handle,
+                    env_handle,
+                    camera_body_handle,
+                    self.front_camera_local_transform,
+                    gymapi.FOLLOW_TRANSFORM,
+                )
+                self.gym.attach_camera_to_body(
+                    depth_camera_handle,
+                    env_handle,
+                    camera_body_handle,
+                    self.front_camera_local_transform,
+                    gymapi.FOLLOW_TRANSFORM,
+                )
+                self.front_camera_color_handles.append(color_camera_handle)
+                self.front_camera_depth_handles.append(depth_camera_handle)
+
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
 
@@ -1624,6 +1696,33 @@ class LeggedRobot(BaseTask):
         img = self.gym.get_camera_image(self.sim, self.envs[0], self.rendering_camera, gymapi.IMAGE_COLOR)
         w, h = img.shape
         return img.reshape([w, h // 4, 4])
+
+    def get_front_camera_data(self, env_id: int = 0):
+        if not self.front_camera_enabled:
+            return None
+        if env_id < 0 or env_id >= len(self.envs):
+            return None
+        if env_id >= len(self.front_camera_color_handles) or env_id >= len(self.front_camera_depth_handles):
+            return None
+
+        self.gym.step_graphics(self.sim)
+        self.gym.render_all_camera_sensors(self.sim)
+
+        color = self.gym.get_camera_image(
+            self.sim, self.envs[env_id], self.front_camera_color_handles[env_id], gymapi.IMAGE_COLOR
+        )
+        depth = self.gym.get_camera_image(
+            self.sim, self.envs[env_id], self.front_camera_depth_handles[env_id], gymapi.IMAGE_DEPTH
+        )
+
+        color = color.reshape((self.front_camera_color_props.height, self.front_camera_color_props.width, 4))[..., :3]
+        depth = -depth.reshape((self.front_camera_depth_props.height, self.front_camera_depth_props.width))
+        depth = np.maximum(depth, 0.0)
+
+        return {
+            "image": color.copy(),
+            "depth": depth.copy(),
+        }
 
     def _render_headless(self):
         if self.record_now and self.complete_video_frames is not None and len(self.complete_video_frames) == 0:

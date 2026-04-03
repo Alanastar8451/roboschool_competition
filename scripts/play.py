@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import io
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -29,10 +30,9 @@ def resolve_latest_run_dir():
         raise FileNotFoundError(f"No training runs found under {runs_root}")
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
-def load_policy(logdir):
-    body = torch.jit.load(logdir + '/checkpoints/body_latest.jit')
-    import os
-    adaptation_module = torch.jit.load(logdir + '/checkpoints/adaptation_module_latest.jit')
+def _load_policy_from_jit(logdir):
+    body = torch.jit.load(logdir + '/checkpoints/body_latest.jit', map_location='cpu')
+    adaptation_module = torch.jit.load(logdir + '/checkpoints/adaptation_module_latest.jit', map_location='cpu')
 
     def policy(obs, info={}):
         latent = adaptation_module.forward(obs["obs_history"].to('cpu'))
@@ -43,9 +43,54 @@ def load_policy(logdir):
     return policy
 
 
+def _load_policy_from_state_dict(logdir, env):
+    from aliengo_gym_learn.ppo_cse.actor_critic import ActorCritic
+
+    actor_critic = ActorCritic(
+        env.num_obs,
+        env.num_privileged_obs,
+        env.num_obs_history,
+        env.num_actions,
+    ).to('cpu')
+    state_dict = torch.load(logdir + '/checkpoints/ac_weights_last.pt', map_location='cpu')
+    actor_critic.load_state_dict(state_dict=state_dict, strict=True)
+    actor_critic.eval()
+
+    def policy(obs, info={}):
+        with torch.no_grad():
+            action = actor_critic.act_student(obs["obs_history"].to('cpu'), policy_info=info)
+        return action
+
+    return policy
+
+
+def load_policy(logdir, env):
+    # On CPU-only setups, JIT modules can crash with low-level c10 errors.
+    # Prefer state_dict policy in that case.
+    if not torch.cuda.is_available():
+        print("CUDA is unavailable, loading policy from ac_weights_last.pt")
+        return _load_policy_from_state_dict(logdir, env)
+    try:
+        return _load_policy_from_jit(logdir)
+    except Exception as exc:
+        print(f"Failed to load JIT policy ({exc}), falling back to ac_weights_last.pt")
+        return _load_policy_from_state_dict(logdir, env)
+
+
+def _load_pickle_with_cpu_torch(file_obj):
+    # `parameters.pkl` can contain CUDA tensors. Force deserialization to CPU
+    # so controller can start even when CUDA is unavailable.
+    original_loader = torch.storage._load_from_bytes
+    torch.storage._load_from_bytes = lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+    try:
+        return pkl.load(file_obj)
+    finally:
+        torch.storage._load_from_bytes = original_loader
+
+
 def load_env(logdir: Path, headless=False):
     with open(logdir / "parameters.pkl", 'rb') as file:
-        pkl_cfg = pkl.load(file)
+        pkl_cfg = _load_pickle_with_cpu_torch(file)
         print(pkl_cfg.keys())
         cfg = pkl_cfg["Cfg"]
         print(cfg.keys())
@@ -54,6 +99,11 @@ def load_env(logdir: Path, headless=False):
             if hasattr(Cfg, key):
                 for key2, value2 in cfg[key].items():
                     setattr(getattr(Cfg, key), key2, value2)
+        from aliengo_gym_learn.ppo_cse.actor_critic import AC_Args
+        ac_cfg = pkl_cfg.get("AC_Args", {})
+        for key, value in ac_cfg.items():
+            if hasattr(AC_Args, key):
+                setattr(AC_Args, key, value)
 
     # turn off DR for evaluation script
     Cfg.domain_rand.push_robots = False
@@ -72,27 +122,36 @@ def load_env(logdir: Path, headless=False):
 
     Cfg.env.num_recording_envs = 1
     Cfg.env.num_envs = 1
-    Cfg.terrain.num_rows = 5
-    Cfg.terrain.num_cols = 5
+    Cfg.env.front_camera_enabled = True
+    Cfg.env.front_camera_attach_body_name = "base"
+    Cfg.env.front_camera_offset_xyz = [0.38, 0.0, 0.18]
+    Cfg.env.front_camera_pitch_deg = 0.0
+    Cfg.terrain.mesh_type = "plane"
+    Cfg.terrain.curriculum = False
+    Cfg.terrain.measure_heights = False
+    Cfg.terrain.num_rows = 1
+    Cfg.terrain.num_cols = 1
     Cfg.terrain.border_size = 0
-    Cfg.terrain.center_robots = True
+    Cfg.terrain.center_robots = False
     Cfg.terrain.center_span = 1
-    Cfg.terrain.teleport_robots = True
+    Cfg.terrain.teleport_robots = False
 
-    Cfg.domain_rand.lag_timesteps = 6
-    Cfg.domain_rand.randomize_lag_timesteps = True
+    Cfg.domain_rand.lag_timesteps = 0
+    Cfg.domain_rand.randomize_lag_timesteps = False
     Cfg.control.control_type = "P"
 
     from aliengo_gym.envs.wrappers.history_wrapper import HistoryWrapper
 
-    env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=headless, cfg=Cfg)
+    sim_device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    if sim_device == 'cpu':
+        Cfg.sim.use_gpu_pipeline = False
+    env = VelocityTrackingEasyEnv(sim_device=sim_device, headless=headless, cfg=Cfg)
     env = HistoryWrapper(env)
 
     # load policy
     from ml_logger import logger
-    from aliengo_gym_learn.ppo_cse.actor_critic import ActorCritic
 
-    policy = load_policy(str(logdir))
+    policy = load_policy(str(logdir), env)
 
     return env, policy
 

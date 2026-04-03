@@ -24,6 +24,11 @@ class BaseTask(gym.Env):
         self.sim_device = sim_device
         sim_device_type, self.sim_device_id = gymutil.parse_device_str(self.sim_device)
         self.headless = headless
+        self.headless_camera_rendering = bool(getattr(cfg.env, "front_camera_enabled", False))
+        if eval_cfg is not None:
+            self.headless_camera_rendering = self.headless_camera_rendering or bool(
+                getattr(eval_cfg.env, "front_camera_enabled", False)
+            )
 
         # env device is GPU only if sim is on GPU and use_gpu_pipeline=True, otherwise returned tensors are copied to CPU by physX.
         if sim_device_type == 'cuda' and sim_params.use_gpu_pipeline:
@@ -33,7 +38,7 @@ class BaseTask(gym.Env):
 
         # graphics device for rendering, -1 for no rendering
         self.graphics_device_id = self.sim_device_id
-        if self.headless == True:
+        if self.headless == True and not self.headless_camera_rendering:
             self.graphics_device_id = -1
 
         self.num_obs = cfg.env.num_observations
