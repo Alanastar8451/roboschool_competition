@@ -1,5 +1,6 @@
 import socket
 import json
+import struct
 
 import cv2
 import numpy as np
@@ -43,9 +44,17 @@ class BridgeNode(Node):
         self.rgb_sock.bind((RGB_IP, RGB_PORT))
         self.rgb_sock.setblocking(False)
 
-        self.depth_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.depth_sock.bind((DEPTH_IP, DEPTH_PORT))
-        self.depth_sock.setblocking(False)
+        # self.depth_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # self.depth_sock.bind((DEPTH_IP, DEPTH_PORT))
+        # self.depth_sock.setblocking(False)
+
+        self.depth_server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.depth_server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.depth_server_sock.bind((DEPTH_IP, DEPTH_PORT))
+        self.depth_server_sock.listen(1)
+        self.depth_server_sock.setblocking(False)
+
+        self.depth_conn = None
 
         self.joint_state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.joint_state_sock.bind((JOINT_STATE_IP, JOINT_STATE_PORT))
@@ -105,6 +114,17 @@ class BridgeNode(Node):
 
         data = json.dumps(payload).encode("utf-8")
         self.cmd_sock.sendto(data, (CMD_IP, CMD_PORT))
+    
+    def recv_exact(self, sock, size):
+        chunks = []
+        received = 0
+        while received < size:
+            chunk = sock.recv(size - received)
+            if not chunk:
+                raise ConnectionError("socket closed")
+            chunks.append(chunk)
+            received += len(chunk)
+        return b"".join(chunks)
 
     def timer_callback(self):
         try:
@@ -152,22 +172,93 @@ class BridgeNode(Node):
         except Exception as e:
             self.get_logger().error(f"rgb receive error: {e}")
 
+        # try:
+        #     data, _ = self.depth_sock.recvfrom(65535)
+
+        #     np_arr = np.frombuffer(data, dtype=np.uint8)
+        #     depth_image = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
+
+        #     if depth_image is not None:
+        #         msg = Image()
+        #         msg.header.stamp = self.get_clock().now().to_msg()
+        #         msg.header.frame_id = "front_camera_depth"
+        #         msg.height = depth_image.shape[0]
+        #         msg.width = depth_image.shape[1]
+        #         msg.encoding = "32FC1"
+        #         msg.is_bigendian = 0
+        #         msg.step = depth_image.shape[1] * 4
+        #         msg.data = depth_image.astype(np.float32).tobytes()
+
+        #         self.depth_pub.publish(msg)
+
+        # try:
+        #     data, _ = self.depth_sock.recvfrom(2000000)
+
+        #     if len(data) < 8:
+        #         raise ValueError("depth packet too small")
+
+        #     h, w = struct.unpack("II", data[:8])
+        #     depth_bytes = data[8:]
+
+        #     expected_size = h * w * 4
+        #     if len(depth_bytes) != expected_size:
+        #         raise ValueError(
+        #             f"depth payload size mismatch: got {len(depth_bytes)}, expected {expected_size}"
+        #         )
+
+        #     depth_image = np.frombuffer(depth_bytes, dtype=np.float32).reshape((h, w))
+
+        #     msg = Image()
+        #     msg.header.stamp = self.get_clock().now().to_msg()
+        #     msg.header.frame_id = "front_camera_depth"
+        #     msg.height = h
+        #     msg.width = w
+        #     msg.encoding = "32FC1"
+        #     msg.is_bigendian = 0
+        #     msg.step = w * 4
+        #     msg.data = depth_image.tobytes()
+
+        #     self.depth_pub.publish(msg)
+
+        # except BlockingIOError:
+        #     pass
+        # except Exception as e:
+        #     self.get_logger().error(f"depth receive error: {e}")
+
         try:
-            data, _ = self.depth_sock.recvfrom(65535)
+            if self.depth_conn is None:
+                try:
+                    self.depth_conn, _ = self.depth_server_sock.accept()
+                    self.depth_conn.setblocking(True)
+                    self.get_logger().info("Depth TCP client connected.")
+                except BlockingIOError:
+                    pass
+            else:
+                header = self.recv_exact(self.depth_conn, 4)
+                payload_size = struct.unpack("I", header)[0]
 
-            np_arr = np.frombuffer(data, dtype=np.uint8)
-            depth_image = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
+                payload = self.recv_exact(self.depth_conn, payload_size)
 
-            if depth_image is not None:
+                h, w = struct.unpack("II", payload[:8])
+                depth_bytes = payload[8:]
+
+                expected_size = h * w * 4
+                if len(depth_bytes) != expected_size:
+                    raise ValueError(
+                        f"depth payload size mismatch: got {len(depth_bytes)}, expected {expected_size}"
+                    )
+
+                depth_image = np.frombuffer(depth_bytes, dtype=np.float32).reshape((h, w))
+
                 msg = Image()
                 msg.header.stamp = self.get_clock().now().to_msg()
                 msg.header.frame_id = "front_camera_depth"
-                msg.height = depth_image.shape[0]
-                msg.width = depth_image.shape[1]
+                msg.height = h
+                msg.width = w
                 msg.encoding = "32FC1"
                 msg.is_bigendian = 0
-                msg.step = depth_image.shape[1] * 4
-                msg.data = depth_image.astype(np.float32).tobytes()
+                msg.step = w * 4
+                msg.data = depth_image.tobytes()
 
                 self.depth_pub.publish(msg)
 
@@ -175,6 +266,12 @@ class BridgeNode(Node):
             pass
         except Exception as e:
             self.get_logger().error(f"depth receive error: {e}")
+            if self.depth_conn is not None:
+                try:
+                    self.depth_conn.close()
+                except Exception:
+                    pass
+                self.depth_conn = None
 
         try:
             data, _ = self.joint_state_sock.recvfrom(65535)

@@ -2,6 +2,8 @@ import socket
 import json
 import time
 import cv2
+import struct
+import numpy as np
 
 
 CMD_IP = "127.0.0.1"
@@ -36,7 +38,9 @@ class SimBridgeClient:
 
         self.state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rgb_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.depth_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # self.depth_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
+        self.depth_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP
+        self.depth_sock.connect((DEPTH_IP, DEPTH_PORT)) # TCP
         self.joint_state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.imu_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -73,17 +77,38 @@ class SimBridgeClient:
         data = encoded.tobytes()
         self.rgb_sock.sendto(data, (RGB_IP, RGB_PORT))
 
+    # UDP with PNG encoding
+    # def send_depth(self, depth):
+    #     depth_clipped = depth.copy()
+    #     depth_clipped = depth_clipped.astype("float32")
+
+    #     success, encoded = cv2.imencode(".png", depth_clipped)
+    #     if not success:
+    #         print("send_depth error: PNG encoding failed")
+    #         return
+
+    #     data = encoded.tobytes()
+    #     self.depth_sock.sendto(data, (DEPTH_IP, DEPTH_PORT))
+
+    # UDP without PNG encoding
+    # def send_depth(self, depth):
+    #     depth = np.asarray(depth, dtype=np.float32)
+
+    #     h, w = depth.shape[:2]
+    #     header = struct.pack("II", h, w)
+    #     payload = header + depth.tobytes()
+
+    #     self.depth_sock.sendto(payload, (DEPTH_IP, DEPTH_PORT))
+
+    # TCP
     def send_depth(self, depth):
-        depth_clipped = depth.copy()
-        depth_clipped = depth_clipped.astype("float32")
+        depth = np.asarray(depth, dtype=np.float32)
 
-        success, encoded = cv2.imencode(".png", depth_clipped)
-        if not success:
-            print("send_depth error: PNG encoding failed")
-            return
+        h, w = depth.shape[:2]
+        payload = struct.pack("II", h, w) + depth.tobytes()
+        packet = struct.pack("I", len(payload)) + payload
 
-        data = encoded.tobytes()
-        self.depth_sock.sendto(data, (DEPTH_IP, DEPTH_PORT))
+        self.depth_sock.sendall(packet)
 
     def send_joint_states(self, names, position, velocity):
         msg = {

@@ -12,13 +12,6 @@ from aliengo_gym.envs import *
 from aliengo_gym.envs.base.legged_robot_config import Cfg
 from aliengo_gym.envs.aliengo.velocity_tracking import VelocityTrackingEasyEnv
 
-REALSENSE_D435_COLOR_WIDTH = 640
-REALSENSE_D435_COLOR_HEIGHT = 360
-REALSENSE_D435_DEPTH_WIDTH = 848
-REALSENSE_D435_DEPTH_HEIGHT = 480
-REALSENSE_D435_COLOR_FOV_H_DEG = 69.0
-REALSENSE_D435_DEPTH_FOV_H_DEG = 87.0
-
 
 def load_policy(logdir):
     body = torch.jit.load(logdir + "/checkpoints/body_latest.jit")
@@ -78,15 +71,12 @@ def load_env(label, headless=False):
 
     Cfg.env.front_camera_enabled = True
     Cfg.env.front_camera_attach_body_name = "trunk"
-    # RealSense D435-like camera profile:
-    # RGB: ~69 deg horizontal FOV, compact 16:9 stream
-    # Depth: ~87 deg horizontal FOV, 848x480 mode
-    Cfg.env.front_camera_color_width_px = REALSENSE_D435_COLOR_WIDTH
-    Cfg.env.front_camera_color_height_px = REALSENSE_D435_COLOR_HEIGHT
-    Cfg.env.front_camera_depth_width_px = REALSENSE_D435_DEPTH_WIDTH
-    Cfg.env.front_camera_depth_height_px = REALSENSE_D435_DEPTH_HEIGHT
-    Cfg.env.front_camera_color_fov_h_deg = REALSENSE_D435_COLOR_FOV_H_DEG
-    Cfg.env.front_camera_depth_fov_h_deg = REALSENSE_D435_DEPTH_FOV_H_DEG
+    Cfg.env.front_camera_color_width_px = 640
+    Cfg.env.front_camera_color_height_px = 394
+    Cfg.env.front_camera_depth_width_px = 640
+    Cfg.env.front_camera_depth_height_px = 424
+    Cfg.env.front_camera_color_fov_h_deg = 70.0
+    Cfg.env.front_camera_depth_fov_h_deg = 86.0
     Cfg.env.front_camera_offset_xyz = [0.315, 0.0, 0.052]
     Cfg.env.front_camera_pitch_deg = -4.0
 
