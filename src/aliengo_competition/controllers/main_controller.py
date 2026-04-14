@@ -96,9 +96,9 @@ class _CameraRenderer:
 
 def run(
     robot: AliengoRobotInterface,
-    steps: int = 1000,
+    steps: int = 15000,
     render_camera: bool = False,
-    camera_depth_max_m: float = 10.0,
+    camera_depth_max_m: float = 4.0,
 ) -> None:
     robot.reset()
     camera_renderer = _CameraRenderer(enabled=render_camera, depth_max_m=camera_depth_max_m)
@@ -136,13 +136,19 @@ def run(
         for step_index in range(total_steps):
             state = robot.get_state()
             camera_renderer.show(state.camera)
-            omega_z = float(state.imu.angular_velocity_xyz[2]) / ang_vel_scale
+            omega_z = state.imu.wz / ang_vel_scale
 
             # ================= USER CONTROL LOGIC START =================
             # This block is the intended place for participant logic.
-            # You can:
-            # - read state.q / state.q_dot / state.imu / state.linear_velocity_xyz / state.camera
-            # - compute desired vx, vy, vw
+            # Measurement names:
+            # - JointState: state.joints.name / state.joints.position / state.joints.velocity
+            #   (aliases: state.q, state.q_dot)
+            # - IMU angular velocity: state.imu.wx / state.imu.wy / state.imu.wz
+            # - Base velocity: state.vx / state.vy / state.wz
+            #   (full vectors: state.base_linear_velocity_xyz, state.base_angular_velocity_xyz)
+            # - Camera: state.camera.image (rgb), state.camera.depth
+            # Control output:
+            # - set desired command vx, vy, vw
             #
             # Example below:
             # - smooth warmup

@@ -19,16 +19,48 @@ class JointState:
     positions: np.ndarray
     velocities: np.ndarray
 
+    @property
+    def name(self) -> Tuple[str, ...]:
+        return self.names
+
+    @property
+    def position(self) -> np.ndarray:
+        return self.positions
+
+    @property
+    def velocity(self) -> np.ndarray:
+        return self.velocities
+
 
 @dataclass
 class ImuState:
     angular_velocity_xyz: np.ndarray
+
+    @property
+    def angular_velocity(self) -> np.ndarray:
+        return self.angular_velocity_xyz
+
+    @property
+    def wx(self) -> float:
+        return float(self.angular_velocity_xyz[0])
+
+    @property
+    def wy(self) -> float:
+        return float(self.angular_velocity_xyz[1])
+
+    @property
+    def wz(self) -> float:
+        return float(self.angular_velocity_xyz[2])
 
 
 @dataclass
 class CameraState:
     rgb: Optional[np.ndarray]
     depth: Optional[np.ndarray]
+
+    @property
+    def image(self) -> Optional[np.ndarray]:
+        return self.rgb
 
 
 @dataclass
@@ -57,3 +89,27 @@ class RobotState:
     @property
     def linear_velocity_xyz(self) -> np.ndarray:
         return self.base_linear_velocity_xyz
+
+    @property
+    def joint_position(self) -> np.ndarray:
+        return self.joints.position
+
+    @property
+    def joint_velocity(self) -> np.ndarray:
+        return self.joints.velocity
+
+    @property
+    def base_velocity_xyz(self) -> np.ndarray:
+        return self.base_linear_velocity_xyz
+
+    @property
+    def vx(self) -> float:
+        return float(self.base_linear_velocity_xyz[0])
+
+    @property
+    def vy(self) -> float:
+        return float(self.base_linear_velocity_xyz[1])
+
+    @property
+    def wz(self) -> float:
+        return float(self.base_angular_velocity_xyz[2])
