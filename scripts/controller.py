@@ -22,11 +22,13 @@ def controller(args):
         headless=args.headless,
         checkpoint=args.checkpoint,
     )
+    seed = 0 if getattr(args, "seed", None) is None else int(args.seed)
     run(
         robot,
         steps=args.steps,
         render_camera=args.render_camera,
         camera_depth_max_m=DEFAULT_CAMERA_DEPTH_MAX_M,
+        seed=seed,
     )
 
 

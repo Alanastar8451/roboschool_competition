@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 
+from aliengo_competition.common.run_logger import CompetitionRunLogger
 from aliengo_competition.robot_interface.base import AliengoRobotInterface
 from aliengo_competition.robot_interface.types import CameraState
 
@@ -99,8 +100,14 @@ def run(
     steps: int = 15000,
     render_camera: bool = False,
     camera_depth_max_m: float = 4.0,
+    seed: int = 0,
 ) -> None:
     robot.reset()
+    env = getattr(robot, "env", None)
+    if env is None:
+        raise ValueError("Robot interface must expose 'env' for mandatory logging.")
+
+    logger = CompetitionRunLogger(env=env, seed=int(seed))
     camera_renderer = _CameraRenderer(enabled=render_camera, depth_max_m=camera_depth_max_m)
     control_dt = _infer_control_dt(robot, fallback_dt=0.02)
     requested_steps = max(int(steps), 1)
@@ -133,9 +140,29 @@ def run(
     segment_start_t = 0.0
 
     try:
+        # Example of API usage outside control loop:
+        # - robot.get_observation() returns latest observation tensor/object.
+        # - robot.get_camera() accesses the raw camera payload if available.
+        initial_observation = robot.get_observation()
+        initial_camera_payload = robot.get_camera()
+        print(
+            "[Controller] API preview:"
+            f" observation_type={type(initial_observation).__name__},"
+            f" camera_payload={'yes' if initial_camera_payload is not None else 'no'}"
+        )
+
         for step_index in range(total_steps):
             state = robot.get_state()
-            camera_renderer.show(state.camera)
+
+            # Example: camera via state and direct method are both supported.
+            camera_payload = robot.get_camera()
+            camera_state = state.camera
+            if (camera_state.rgb is None or camera_state.depth is None) and isinstance(camera_payload, dict):
+                camera_state = CameraState(
+                    rgb=camera_payload.get("image"),
+                    depth=camera_payload.get("depth"),
+                )
+            camera_renderer.show(camera_state)
             omega_z = state.imu.wz / ang_vel_scale
 
             # ================= USER CONTROL LOGIC START =================
@@ -155,6 +182,10 @@ def run(
             # - continuous figure-eight in velocity space
             # - yaw-rate command combines feed-forward turn and damping
             sim_t = state.sim_time_s
+
+            def mark_detected_object(object_id: int) -> None:
+                logger.log_detected_object_at_time(int(object_id), float(sim_t))
+
             local_t = max(sim_t - segment_start_t, 0.0)
             if local_t < warmup_s:
                 vx = 0.0
@@ -171,14 +202,23 @@ def run(
                 vw = ramp * (yaw_ff - yaw_rate_damping * omega_z)
                 vw = max(min(vw, 1.0), -1.0)
             # ================== USER CONTROL LOGIC END ==================
+            # Optional object-detection logging hook:
+            # Set detected_object_id to an integer object ID when your
+            # detection condition triggers on this step.
+            detected_object_id = None
+            if detected_object_id is not None:
+                mark_detected_object(detected_object_id)
 
             robot.set_speed(vx, vy, vw)
             robot.step()
+            logger.log_step((step_index + 1) * control_dt)
+            robot.get_observation()  # Example of observation access after step().
             if robot.is_fallen():
                 robot.stop()
                 robot.reset()
                 segment_start_t = (step_index + 1) * control_dt
                 continue
     finally:
+        logger.close()
         camera_renderer.close()
         robot.stop()
