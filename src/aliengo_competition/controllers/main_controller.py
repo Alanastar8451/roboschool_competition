@@ -44,6 +44,7 @@ def _get_yolo_model():
 
 box = None
 FLAG = 'walk'
+timestamp = None
 
 def get_found_object_id(
     current_state,
@@ -288,7 +289,7 @@ def run(
     camera_depth_max_m: float = 4.0,
     seed: int = 0,
 ) -> None:
-    global FLAG, box
+    global FLAG, box, timestamp
 
     robot.reset()
     env = getattr(robot, "env", None)
@@ -463,14 +464,20 @@ def run(
                         vw = 1.0
                         vx = 1.5
 
-                    if camera_data["depth"][center_y, center_x] < 1.25 and detected_object_id == object_queue[0][0]:
+                    if camera_data["depth"][center_y, center_x] < 0.5 and detected_object_id == object_queue[0][0]:
                         print(f"""\n\n[IMPORTANT]
 # [IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}
 # [IMPORTANT]\n\n""")
                         object_queue.pop(0)
-                        time.sleep(2)
-                        FLAG = 'walk'
+                        timestamp = time.time()
+                        FLAG = 'wait'
                 else:
+                    FLAG = 'walk'
+            elif FLAG == 'wait':
+                vx = 0.0
+                vy = 0.0
+                vw = 0.0
+                if time.time() - timestamp > 2:
                     FLAG = 'walk'
             # ================== USER CONTROL LOGIC END ==================
 
