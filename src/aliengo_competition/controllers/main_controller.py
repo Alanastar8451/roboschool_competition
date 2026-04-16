@@ -473,30 +473,30 @@ def run(
     # 2. USER CONTROL LOGIC START / END
 
     # ================= USER PARAMETERS START =================
-    search_vx = 0.30
-    search_vy_amp = 0.08
-    search_wz_base = 0.95
-    search_period_s = 12.0
-    reacquire_timeout_s = 1.6
+    search_vx = 0.65
+    search_vy_amp = 0.05
+    search_wz_base = 1.20
+    search_period_s = 8.0
+    reacquire_timeout_s = 1.0
 
-    approach_vx_max = 0.62
+    approach_vx_max = 0.85
     approach_distance_target_m = 0.52
-    approach_slowdown_distance_m = 2.20
+    approach_slowdown_distance_m = 2.00
     stop_distance_m = 0.62
     success_depth_m = 0.80
-    success_bearing_rad = math.radians(8.0)
+    success_bearing_rad = math.radians(10.0)
     success_hold_frames = 8
 
-    obstacle_emergency_dist_m = 0.78
-    obstacle_slowdown_dist_m = 1.15
+    obstacle_emergency_dist_m = 0.65
+    obstacle_slowdown_dist_m = 1.0
 
-    stuck_speed_eps = 0.05
-    stuck_command_min_vx = 0.22
-    avoid_reverse_vx = -0.22
-    avoid_turn_wz = 1.65
-    avoid_forward_vx = 0.07
-    avoid_reverse_s = 0.55
-    avoid_total_s = 1.45
+    stuck_speed_eps = 0.08
+    stuck_command_min_vx = 0.2
+    avoid_reverse_vx = -0.4
+    avoid_turn_wz = 2.0
+    avoid_forward_vx = 0.2
+    avoid_reverse_s = 1.0
+    avoid_total_s = 2.5
     # ================== USER PARAMETERS END ==================
 
     target_idx = 0
