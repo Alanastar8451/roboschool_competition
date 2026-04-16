@@ -254,6 +254,15 @@ def run(
                 yaw_ff = yaw_rate_amp * math.sin(phase + math.pi / 4.0)
                 vw = ramp * (yaw_ff - yaw_rate_damping * state.imu.wz / ang_vel_scale)
                 vw = max(min(vw, 1.0), -1.0)
+
+            center_x = camera_data["depth"].shape[1] // 2
+            center_y = camera_data["depth"].shape[0] // 2
+
+            print(f"center_x={center_x}, center_y={center_y}, depth={camera_data['depth'][center_y, center_x]}")
+            if camera_data["depth"][center_y, center_x] > 1 and camera_data["depth"][center_y, center_x // 2] > 1:
+                vx = 1.5
+            else:
+                vw = -2.0
             # ================== USER CONTROL LOGIC END ==================
 
             robot.set_speed(vx, vy, vw)
