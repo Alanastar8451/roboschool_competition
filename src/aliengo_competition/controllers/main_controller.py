@@ -45,6 +45,7 @@ def _get_yolo_model():
 box = None
 FLAG = 'walk'
 timestamp = None
+stuck_timer = None
 
 def get_found_object_id(
     current_state,
@@ -422,11 +423,6 @@ def run(
 
             if detected_object_id is not None and detected_object_id == object_queue[0][0]:
                 FLAG = 'object_found'
-#                 print(f"""\n\n[IMPORTANT]
-# [IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}
-# [IMPORTANT]\n\n""")
-#                 object_queue.pop(0)
-#                 time.sleep(2)
 
             local_t = max(sim_t - segment_start_t, 0.0)
             if local_t < warmup_s:
@@ -447,15 +443,27 @@ def run(
             center_x = camera_data["depth"].shape[1] // 2
             center_y = camera_data["depth"].shape[0] // 2
 
+            center_depth = camera_data["depth"][center_y, center_x]
+            center_left_depth = camera_data["depth"][center_y, center_x // 2]
+            center_right_depth = camera_data["depth"][center_y, (center_x // 2) * 3]
+
             if FLAG == 'walk':
-                if camera_data["depth"][center_y, center_x] > 1 and camera_data["depth"][center_y, center_x // 2] > 1:
-                    vx = 1.5
-                else:
+                if (center_depth < 1
+                  # and center_left_depth < 1
+                ):
+                  if center_left_depth < center_right_depth:
                     vw = -2.0
+                  else:
+                    vw = 2.0
+                else:
+                  vx = 1.5
             elif FLAG == 'object_found':
                 if box is not None:
                     x1, y1, x2, y2, conf_value, cls_name, obj_id = box
                     object_center_x = (x1 + x2) / 2
+                    object_center_y = (y1 + y2) / 2
+
+                    center_box_depth = camera_data["depth"][object_center_y, object_center_x]
 
                     if object_center_x > center_x:
                         vw = -1.0
@@ -464,10 +472,9 @@ def run(
                         vw = 1.0
                         vx = 1.5
 
-                    if camera_data["depth"][center_y, center_x] < 0.75 and detected_object_id == object_queue[0][0]:
-                        print(f"""\n\n[IMPORTANT]
-# [IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}
-# [IMPORTANT]\n\n""")
+                    if center_box_depth < 0.75 and detected_object_id == object_queue[0][0]:
+                        # camera_data["depth"][center_y, center_x]
+                        print(f"""\n\n[IMPORTANT]\n[IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}\n[IMPORTANT]\n\n""")
                         object_queue.pop(0)
                         timestamp = time.time()
                         FLAG = 'wait'
@@ -479,6 +486,15 @@ def run(
                 vw = 0.0
                 if time.time() - timestamp > 2:
                     FLAG = 'walk'
+            elif FLAG == 'unstuck':
+                vx = -1.5
+
+            if center_depth > 0.5 or stuck_timer is None:
+                stuck_timer = time.time()
+
+            if time.time() - stuck_timer > 15:
+                FLAG = 'unstuck'
+            
             # ================== USER CONTROL LOGIC END ==================
 
             robot.set_speed(vx, vy, vw)
