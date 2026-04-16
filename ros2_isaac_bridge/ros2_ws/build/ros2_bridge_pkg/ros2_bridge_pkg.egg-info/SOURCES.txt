@@ -11,6 +11,12 @@ setup.py
 resource/ros2_bridge_pkg
 ros2_bridge_pkg/__init__.py
 ros2_bridge_pkg/bridge_node.py
-test/test_copyright.py
-test/test_flake8.py
-test/test_pep257.py
+ros2_bridge_pkg/mission_node.py
+ros2_bridge_pkg/reference_detector.py
+ros2_bridge_pkg.egg-info/PKG-INFO
+ros2_bridge_pkg.egg-info/SOURCES.txt
+ros2_bridge_pkg.egg-info/dependency_links.txt
+ros2_bridge_pkg.egg-info/entry_points.txt
+ros2_bridge_pkg.egg-info/requires.txt
+ros2_bridge_pkg.egg-info/top_level.txt
+ros2_bridge_pkg.egg-info/zip-safe

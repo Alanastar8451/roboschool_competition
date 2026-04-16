@@ -1,0 +1,18 @@
+[0.887s] Invoking command in '/workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg': PYTHONPATH=/workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/install/ros2_bridge_pkg/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg/build --no-deps symlink_data
+[1.267s] running develop
+[1.517s] running egg_info
+[1.537s] writing ros2_bridge_pkg.egg-info/PKG-INFO
+[1.538s] writing dependency_links to ros2_bridge_pkg.egg-info/dependency_links.txt
+[1.538s] writing entry points to ros2_bridge_pkg.egg-info/entry_points.txt
+[1.538s] writing requirements to ros2_bridge_pkg.egg-info/requires.txt
+[1.538s] writing top-level names to ros2_bridge_pkg.egg-info/top_level.txt
+[1.584s] reading manifest file 'ros2_bridge_pkg.egg-info/SOURCES.txt'
+[1.585s] writing manifest file 'ros2_bridge_pkg.egg-info/SOURCES.txt'
+[1.609s] running build_ext
+[1.610s] Creating /workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/install/ros2_bridge_pkg/lib/python3.12/site-packages/ros2-bridge-pkg.egg-link (link to .)
+[1.610s] Installing bridge_node script to /workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/install/ros2_bridge_pkg/lib/ros2_bridge_pkg
+[1.611s] Installing mission_node script to /workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/install/ros2_bridge_pkg/lib/ros2_bridge_pkg
+[1.611s] 
+[1.611s] Installed /workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg
+[1.611s] running symlink_data
+[1.650s] Invoked command in '/workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg' returned '0': PYTHONPATH=/workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/install/ros2_bridge_pkg/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /workspace/aliengo_competition/ros2_isaac_bridge/ros2_ws/build/ros2_bridge_pkg/build --no-deps symlink_data

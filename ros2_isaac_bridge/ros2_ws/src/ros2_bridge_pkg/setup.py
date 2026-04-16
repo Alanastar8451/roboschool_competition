@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'bridge_node = ros2_bridge_pkg.bridge_node:main',
+            'mission_node = ros2_bridge_pkg.mission_node:main',
         ],
     },
 )

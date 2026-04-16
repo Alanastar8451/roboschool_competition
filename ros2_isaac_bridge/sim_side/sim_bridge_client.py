@@ -24,6 +24,12 @@ JOINT_STATE_PORT = 5009
 IMU_IP = "127.0.0.1"
 IMU_PORT = 5010
 
+MISSION_IP = "127.0.0.1"
+MISSION_PORT = 5011
+
+DETECTION_IP = "127.0.0.1"
+DETECTION_PORT = 5012
+
 class SimBridgeClient:
     def __init__(self):
         self.latest_cmd = {
@@ -43,6 +49,12 @@ class SimBridgeClient:
         self.depth_sock.connect((DEPTH_IP, DEPTH_PORT)) # TCP
         self.joint_state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.imu_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        self.mission_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        self.detection_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.detection_sock.bind((DETECTION_IP, DETECTION_PORT))
+        self.detection_sock.setblocking(False)
 
     def receive_cmd(self):
         try:
@@ -135,3 +147,23 @@ class SimBridgeClient:
         }
         data = json.dumps(msg).encode("utf-8")
         self.imu_sock.sendto(data, (IMU_IP, IMU_PORT))
+
+    def send_mission_data(self, queue, current_target_id, status):
+        msg = {
+            "queue": queue,
+            "current_target_id": int(current_target_id),
+            "status": status,
+        }
+        data = json.dumps(msg).encode("utf-8")
+        self.mission_sock.sendto(data, (MISSION_IP, MISSION_PORT))
+
+    def receive_detected_object_id(self):
+        try:
+            data, _ = self.detection_sock.recvfrom(4096)
+            msg = json.loads(data.decode("utf-8"))
+            return int(msg.get("object_id", -1))
+        except BlockingIOError:
+            return None
+        except Exception as e:
+            print(f"receive_detected_object_id error: {e}")
+            return None

@@ -101,12 +101,23 @@ def load_env(label, headless=False, seed=0):
 
 
 def main():
-    label = "gait-conditioned-agility/aliengo-v0/train"
-    seed = 5
+    import argparse
+    parser = argparse.ArgumentParser(description="Isaac controller with ROS2 bridge")
+    parser.add_argument("--seed", type=int, default=5)
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--label", type=str,
+                        default="gait-conditioned-agility/aliengo-v0/train")
+    args = parser.parse_args()
+
+    label = args.label
+    seed = args.seed
 
     bridge = SimBridgeClient()
-    env, policy = load_env(label, headless=False, seed=seed)
+    env, policy = load_env(label, headless=args.headless, seed=seed)
     SEQUENCE_OF_OBJECTS = env.SEQUENCE_OF_OBJECTS
+
+    mission_current_index = 0
+    mission_done_ids = []
 
     obs = env.reset()
 
@@ -237,9 +248,17 @@ def main():
         log_file.write(f"{t:.3f},{x:.4f},{y:.4f},{yaw:.4f}\n")
         log_file.flush()
 
-        # IMPORTANT! Add each detected object here:
-        # if YOUR_CONDITION:
-        #     log_detected_object(DETECTED_OBJECT_ID)
+        detected_id = bridge.receive_detected_object_id()
+        if detected_id is not None and mission_current_index < len(SEQUENCE_OF_OBJECTS):
+            expected_id = SEQUENCE_OF_OBJECTS[mission_current_index][0]
+            if detected_id == expected_id and detected_id not in mission_done_ids:
+                log_detected_object(detected_id)
+                mission_done_ids.append(detected_id)
+                mission_current_index += 1
+                print(f"[MISSION] Object {detected_id} confirmed. "
+                      f"Progress: {mission_current_index}/{len(SEQUENCE_OF_OBJECTS)}")
+            elif detected_id not in mission_done_ids:
+                print(f"[MISSION] Wrong order: got {detected_id}, expected {expected_id}")
 
         camera_data = env.get_front_camera_data(0)
 
@@ -279,6 +298,22 @@ def main():
         bridge.send_imu(
             ang_vel=base_ang_vel,
             lin_acc=base_lin_acc,
+        )
+
+        mission_finished = mission_current_index >= len(SEQUENCE_OF_OBJECTS)
+        mission_target_id = (
+            SEQUENCE_OF_OBJECTS[mission_current_index][0]
+            if not mission_finished else -1
+        )
+        bridge.send_mission_data(
+            queue=[[oid, name] for oid, name in SEQUENCE_OF_OBJECTS],
+            current_target_id=mission_target_id,
+            status={
+                "current_index": mission_current_index,
+                "done_ids": list(mission_done_ids),
+                "remaining_ids": [o[0] for o in SEQUENCE_OF_OBJECTS[mission_current_index:]],
+                "finished": mission_finished,
+            },
         )
 
         print(

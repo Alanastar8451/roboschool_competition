@@ -10,6 +10,7 @@ from rclpy.node import Node
 
 from geometry_msgs.msg import Twist, TwistStamped
 from sensor_msgs.msg import Image, JointState, Imu
+from std_msgs.msg import String, Int32
 
 
 CMD_IP = "127.0.0.1"
@@ -29,6 +30,12 @@ JOINT_STATE_PORT = 5009
 
 IMU_IP = "127.0.0.1"
 IMU_PORT = 5010
+
+MISSION_IP = "127.0.0.1"
+MISSION_PORT = 5011
+
+DETECTION_IP = "127.0.0.1"
+DETECTION_PORT = 5012
 
 class BridgeNode(Node):
     def __init__(self):
@@ -65,6 +72,12 @@ class BridgeNode(Node):
         self.imu_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.imu_sock.bind((IMU_IP, IMU_PORT))
         self.imu_sock.setblocking(False)
+
+        self.mission_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.mission_sock.bind((MISSION_IP, MISSION_PORT))
+        self.mission_sock.setblocking(False)
+
+        self.detection_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         self.cmd_sub = self.create_subscription(
             Twist,
@@ -103,9 +116,32 @@ class BridgeNode(Node):
             10,
         )
 
+        self.mission_queue_pub = self.create_publisher(
+            String, "/aliengo/mission_queue", 10)
+        self.current_target_pub = self.create_publisher(
+            Int32, "/aliengo/current_target_id", 10)
+        self.mission_status_pub = self.create_publisher(
+            String, "/aliengo/mission_status", 10)
+
+        self.detected_obj_sub = self.create_subscription(
+            Int32,
+            "/aliengo/detected_object_id",
+            self.detected_obj_callback,
+            10,
+        )
+
+        self._mission_recv_count = 0
+
         self.timer = self.create_timer(0.05, self.timer_callback)
 
         self.get_logger().info("ROS bridge node started.")
+
+    def detected_obj_callback(self, msg: Int32):
+        payload = json.dumps({"object_id": msg.data}).encode("utf-8")
+        try:
+            self.detection_sock.sendto(payload, (DETECTION_IP, DETECTION_PORT))
+        except Exception as e:
+            self.get_logger().error(f"detection send error: {e}")
 
     def cmd_callback(self, msg: Twist):
         payload = {
@@ -321,6 +357,33 @@ class BridgeNode(Node):
             pass
         except Exception as e:
             self.get_logger().error(f"imu receive error: {e}")
+
+        try:
+            data, _ = self.mission_sock.recvfrom(65535)
+            mission_msg = json.loads(data.decode("utf-8"))
+
+            self._mission_recv_count += 1
+            if self._mission_recv_count in (1, 10, 100) or self._mission_recv_count % 500 == 0:
+                self.get_logger().info(
+                    f"[MISSION] recv #{self._mission_recv_count}, "
+                    f"target={mission_msg.get('current_target_id')}"
+                )
+
+            q = String()
+            q.data = json.dumps(mission_msg.get("queue", []))
+            self.mission_queue_pub.publish(q)
+
+            t = Int32()
+            t.data = int(mission_msg.get("current_target_id", -1))
+            self.current_target_pub.publish(t)
+
+            s = String()
+            s.data = json.dumps(mission_msg.get("status", {}))
+            self.mission_status_pub.publish(s)
+        except BlockingIOError:
+            pass
+        except Exception as e:
+            self.get_logger().error(f"mission receive error: {e}")
 
 
 def main(args=None):
