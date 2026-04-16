@@ -268,6 +268,29 @@ def _depth_center_clearance(depth_map: np.ndarray, width_frac: float = 0.35, hei
     return float(np.percentile(roi, 20.0))
 
 
+def _depth_center_min(depth_map: np.ndarray, width_frac: float = 0.42, height_frac: float = 0.42) -> Optional[float]:
+    if depth_map is None:
+        return None
+    depth = np.asarray(depth_map, dtype=np.float32)
+    if depth.ndim != 2:
+        return None
+    h, w = depth.shape
+    hw = int(0.5 * width_frac * w)
+    hh = int(0.5 * height_frac * h)
+    cx = w // 2
+    cy = h // 2
+    x0 = max(cx - hw, 0)
+    x1 = min(cx + hw, w)
+    y0 = max(cy - hh, 0)
+    y1 = min(cy + hh, h)
+    roi = depth[y0:y1, x0:x1]
+    roi = roi[np.isfinite(roi)]
+    roi = roi[(roi > 0.05) & (roi < 25.0)]
+    if roi.size == 0:
+        return None
+    return float(np.min(roi))
+
+
 def _depth_side_clearance(depth_map: np.ndarray, left: bool) -> Optional[float]:
     if depth_map is None:
         return None
@@ -451,7 +474,7 @@ def run(
 
     # ================= USER PARAMETERS START =================
     search_vx = 0.30
-    search_vy_amp = 0.22
+    search_vy_amp = 0.08
     search_wz_base = 0.95
     search_period_s = 12.0
     reacquire_timeout_s = 1.6
@@ -464,8 +487,16 @@ def run(
     success_bearing_rad = math.radians(8.0)
     success_hold_frames = 8
 
-    obstacle_emergency_dist_m = 0.62
-    obstacle_slowdown_dist_m = 0.95
+    obstacle_emergency_dist_m = 0.78
+    obstacle_slowdown_dist_m = 1.15
+
+    stuck_speed_eps = 0.05
+    stuck_command_min_vx = 0.22
+    avoid_reverse_vx = -0.22
+    avoid_turn_wz = 1.65
+    avoid_forward_vx = 0.07
+    avoid_reverse_s = 0.55
+    avoid_total_s = 1.45
     # ================== USER PARAMETERS END ==================
 
     target_idx = 0
@@ -473,6 +504,9 @@ def run(
     last_seen_t = -1e9
     last_seen_bearing = 0.0
     logged_object_ids = set()
+    avoid_mode_end_t = -1e9
+    avoid_reverse_end_t = -1e9
+    avoid_turn_sign = 1.0
 
     try:
         initial_observation = robot.get_observation()
@@ -666,22 +700,49 @@ def run(
                         vw = direction * (search_wz_base + 0.35 * math.sin(phase))
 
                 center_clearance = _depth_center_clearance(depth)
-                if center_clearance is not None and center_clearance < obstacle_emergency_dist_m:
-                    left_clearance = _depth_side_clearance(depth, left=True)
-                    right_clearance = _depth_side_clearance(depth, left=False)
-                    turn_sign = 1.0
+                center_min_clearance = _depth_center_min(depth)
+                left_clearance = _depth_side_clearance(depth, left=True)
+                right_clearance = _depth_side_clearance(depth, left=False)
+
+                emergency_collision_risk = (
+                    (center_min_clearance is not None and center_min_clearance < obstacle_emergency_dist_m)
+                    or (center_clearance is not None and center_clearance < 0.9 * obstacle_emergency_dist_m)
+                )
+                likely_stuck = (
+                    abs(measured_vx) < stuck_speed_eps
+                    and abs(vx) > stuck_command_min_vx
+                    and center_clearance is not None
+                    and center_clearance < obstacle_slowdown_dist_m
+                )
+
+                if emergency_collision_risk or likely_stuck:
+                    turn_sign = avoid_turn_sign
                     if left_clearance is not None and right_clearance is not None:
                         turn_sign = 1.0 if left_clearance >= right_clearance else -1.0
-                    vx = -0.10
-                    vy = 0.0
-                    vw = 1.4 * turn_sign
+                    avoid_turn_sign = turn_sign
+                    avoid_reverse_end_t = max(avoid_reverse_end_t, sim_t + avoid_reverse_s)
+                    avoid_mode_end_t = max(avoid_mode_end_t, sim_t + avoid_total_s)
                 elif center_clearance is not None and center_clearance < obstacle_slowdown_dist_m:
                     vx *= 0.55
+
+                if sim_t < avoid_mode_end_t:
+                    if sim_t < avoid_reverse_end_t:
+                        vx = avoid_reverse_vx
+                        vy = 0.0
+                        vw = 0.0
+                    else:
+                        vx = avoid_forward_vx
+                        vy = 0.0
+                        vw = avoid_turn_wz * avoid_turn_sign
 
                 if step_index % max(int(round(1.0 / max(control_dt, 1e-3))), 1) == 0:
                     status = f"target={target_id}:{target_name}, seen={'yes' if detection is not None else 'no'}"
                     if center_clearance is not None:
                         status += f", clearance={center_clearance:.2f}m"
+                    if center_min_clearance is not None:
+                        status += f", min_clearance={center_min_clearance:.2f}m"
+                    if sim_t < avoid_mode_end_t:
+                        status += ", recovery=active"
                     print(f"[Контроллер] {status}")
 
             vx, vy, vw = _clip_speed(vx, vy, vw)
@@ -697,6 +758,8 @@ def run(
                 robot.reset()
                 hold_counter = 0
                 last_seen_t = -1e9
+                avoid_mode_end_t = -1e9
+                avoid_reverse_end_t = -1e9
                 print("[Контроллер] робот упал -> сброс")
                 continue
     finally:
