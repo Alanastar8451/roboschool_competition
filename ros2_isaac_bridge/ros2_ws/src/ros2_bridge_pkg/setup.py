@@ -11,7 +11,12 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'ultralytics',
+        'opencv-python',
+        'numpy'
+    ],
     zip_safe=True,
     maintainer='ammar',
     maintainer_email='ammar.issa.500@gmail.com',
@@ -26,6 +31,7 @@ setup(
         'console_scripts': [
             'bridge_node = ros2_bridge_pkg.bridge_node:main',
             'mission_node = ros2_bridge_pkg.mission_node:main',
+            'object_detector = ros2_bridge_pkg.object_detector_node:main',
         ],
     },
 )
