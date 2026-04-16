@@ -464,7 +464,7 @@ def run(
                         vw = 1.0
                         vx = 1.5
 
-                    if camera_data["depth"][center_y, center_x] < 0.5 and detected_object_id == object_queue[0][0]:
+                    if camera_data["depth"][center_y, center_x] < 0.75 and detected_object_id == object_queue[0][0]:
                         print(f"""\n\n[IMPORTANT]
 # [IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}
 # [IMPORTANT]\n\n""")
