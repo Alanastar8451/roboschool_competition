@@ -4,6 +4,8 @@ import math
 
 import numpy as np
 
+import time
+
 from aliengo_competition.common.run_logger import CompetitionRunLogger
 from aliengo_competition.robot_interface.base import AliengoRobotInterface
 from aliengo_competition.robot_interface.types import CameraState
@@ -11,7 +13,7 @@ from aliengo_competition.robot_interface.types import CameraState
 
 _YOLO_MODEL = None
 _YOLO_MODEL_LOAD_ERROR = None
-_YOLO_DEBUG = True
+_YOLO_DEBUG = False
 
 
 def _yolo_dbg(msg: str) -> None:
@@ -40,6 +42,9 @@ def _get_yolo_model():
         return None
 
 
+box = None
+FLAG = 'walk'
+
 def get_found_object_id(
     current_state,
     current_camera_data,
@@ -51,6 +56,8 @@ def get_found_object_id(
     Only these object types are considered: mug, laptop, bottle, chair, backpack.
     In the simulator mapping "mug" corresponds to COCO class "cup".
     """
+
+    global box
 
     # Queue items are typically (id, name). We will detect ANY of them.
     if not current_object_queue:
@@ -124,11 +131,17 @@ def get_found_object_id(
 
     classes = boxes.cls
     confs = getattr(boxes, "conf", None)
+    xyxy = getattr(boxes, "xyxy", None)
     try:
         classes_np = classes.detach().cpu().numpy() if hasattr(classes, "detach") else np.asarray(classes)
         confs_np = (
             confs.detach().cpu().numpy() if (confs is not None and hasattr(confs, "detach")) else np.asarray(confs)
             if confs is not None
+            else None
+        )
+        xyxy_np = (
+            xyxy.detach().cpu().numpy() if (xyxy is not None and hasattr(xyxy, "detach")) else np.asarray(xyxy)
+            if xyxy is not None
             else None
         )
     except Exception as exc:
@@ -140,7 +153,7 @@ def get_found_object_id(
     # Determine best match among detections:
     # - prefer earliest object in queue
     # - tie-breaker: highest confidence
-    best = None  # (queue_index, -conf, object_id, cls_name)
+    best = None  # (queue_index, -conf, object_id, cls_name, det_index)
     for idx, cls_id in enumerate(classes_np.tolist()):
         cls_name = str(names.get(int(cls_id), "")).lower()
         cls_conf = float(confs_np[idx]) if confs_np is not None else None
@@ -152,16 +165,33 @@ def get_found_object_id(
             continue
         queue_index, obj_id = queue_map[cls_name]
         conf_value = float(confs_np[idx]) if confs_np is not None else 1.0
-        candidate = (queue_index, -conf_value, obj_id, cls_name)
+        candidate = (queue_index, -conf_value, obj_id, cls_name, idx)
         if best is None or candidate < best:
             best = candidate
 
     if best is None:
         _yolo_dbg("return None: none of the allowed queue objects found in detections")
+        print("return None: none of the allowed queue objects found in detections")
         return None
 
-    _queue_index, _neg_conf, obj_id, cls_name = best
+    _queue_index, _neg_conf, obj_id, cls_name, det_index = best
+    box = None
+    if xyxy_np is not None and len(xyxy_np) > det_index:
+        try:
+            x1, y1, x2, y2 = [float(v) for v in xyxy_np[det_index].tolist()]
+            conf_value = float(confs_np[det_index]) if confs_np is not None else None
+            box = (x1, y1, x2, y2, conf_value, cls_name, int(obj_id))
+            _yolo_dbg(f"box: {box}")
+            print(f"box: {box}")
+        except Exception as exc:
+            box = None
+            _yolo_dbg(f"box: failed to extract ({exc})")
+            print(f"box: failed to extract ({exc})")
+    else:
+        _yolo_dbg("box: not available (xyxy missing)")
+        print("box: not available (xyxy missing)")
     _yolo_dbg(f"FOUND: class='{cls_name}' returning object_id={obj_id}")
+    print(f"FOUND: class='{cls_name}' returning object_id={obj_id}")
     return obj_id
 
 
@@ -258,6 +288,8 @@ def run(
     camera_depth_max_m: float = 4.0,
     seed: int = 0,
 ) -> None:
+    global FLAG, box
+
     robot.reset()
     env = getattr(robot, "env", None)
     if env is None:
@@ -387,6 +419,14 @@ def run(
             if detected_object_id is not None:
                 log_found_object(detected_object_id)
 
+            if detected_object_id is not None and detected_object_id == object_queue[0][0]:
+                FLAG = 'object_found'
+#                 print(f"""\n\n[IMPORTANT]
+# [IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}
+# [IMPORTANT]\n\n""")
+#                 object_queue.pop(0)
+#                 time.sleep(2)
+
             local_t = max(sim_t - segment_start_t, 0.0)
             if local_t < warmup_s:
                 vx = 0.0
@@ -406,11 +446,32 @@ def run(
             center_x = camera_data["depth"].shape[1] // 2
             center_y = camera_data["depth"].shape[0] // 2
 
-            # print(f"center_x={center_x}, center_y={center_y}, depth={camera_data['depth'][center_y, center_x]}")
-            if camera_data["depth"][center_y, center_x] > 1 and camera_data["depth"][center_y, center_x // 2] > 1:
-                vx = 1.5
-            else:
-                vw = -2.0
+            if FLAG == 'walk':
+                if camera_data["depth"][center_y, center_x] > 1 and camera_data["depth"][center_y, center_x // 2] > 1:
+                    vx = 1.5
+                else:
+                    vw = -2.0
+            elif FLAG == 'object_found':
+                if box is not None:
+                    x1, y1, x2, y2, conf_value, cls_name, obj_id = box
+                    object_center_x = (x1 + x2) / 2
+
+                    if object_center_x > center_x:
+                        vw = -1.0
+                        vx = 1.5
+                    else:
+                        vw = 1.0
+                        vx = 1.5
+
+                    if camera_data["depth"][center_y, center_x] < 1.25 and detected_object_id == object_queue[0][0]:
+                        print(f"""\n\n[IMPORTANT]
+# [IMPORTANT] detected_object_id={detected_object_id} == object_queue[0]={object_queue[0]}
+# [IMPORTANT]\n\n""")
+                        object_queue.pop(0)
+                        time.sleep(2)
+                        FLAG = 'walk'
+                else:
+                    FLAG = 'walk'
             # ================== USER CONTROL LOGIC END ==================
 
             robot.set_speed(vx, vy, vw)
