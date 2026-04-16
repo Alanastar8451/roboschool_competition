@@ -1,11 +1,10 @@
 """
-AKAZE-based reference image detector.
+YOLO-based object detector backend.
 
-Matches a reference texture image against the current camera frame
-using local feature descriptors and homography estimation.
+Detects only five allowed object categories and returns detections
+for the mission finite-state machine.
 """
 
-import os
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -24,184 +23,138 @@ class Detection:
 
 
 class ReferenceImageDetectorBackend:
+    _ALLOWED_CLASS_NAMES = {"cup", "laptop", "bottle", "chair", "backpack"}
+    _ALIASES = {
+        "cup": "cup",
+        "mug": "cup",
+        "laptop": "laptop",
+        "notebook": "laptop",
+        "bottle": "bottle",
+        "water_bottle": "bottle",
+        "chair": "chair",
+        "backpack": "backpack",
+    }
+
     def __init__(
         self,
         refs_dir: str,
-        min_matches: int = 8,
-        min_inliers: int = 6,
-        ransac_reproj_threshold: float = 5.0,
+        model_path: str = "yolo11n.pt",
+        conf_threshold: float = 0.12,
+        iou_threshold: float = 0.45,
         min_bbox_area: int = 400,
-        lowe_ratio: float = 0.75,
+        imgsz: int = 640,
+        device: str = "cpu",
         debug_visualization: bool = False,
     ):
         self.refs_dir = refs_dir
-        self.min_matches = min_matches
-        self.min_inliers = min_inliers
-        self.ransac_reproj_threshold = ransac_reproj_threshold
+        self.model_path = model_path
+        self.conf_threshold = conf_threshold
+        self.iou_threshold = iou_threshold
         self.min_bbox_area = min_bbox_area
-        self.lowe_ratio = lowe_ratio
+        self.imgsz = imgsz
+        self.device = device
         self.debug_visualization = debug_visualization
 
-        self.akaze = cv2.AKAZE_create()
-        self.orb = cv2.ORB_create(nfeatures=2000)
-        self.bf_hamming = cv2.BFMatcher(cv2.NORM_HAMMING)
+        try:
+            from ultralytics import YOLO
+        except ImportError as exc:
+            raise RuntimeError(
+                "ultralytics is required. Install it with: pip install ultralytics"
+            ) from exc
 
-        self._ref_cache: dict = {}
+        self.model = YOLO(self.model_path)
+        self.model_names = self.model.names
+        self.allowed_class_ids = self._resolve_allowed_class_ids()
 
-    # ------------------------------------------------------------------
-    # Reference image loading with caching
-    # ------------------------------------------------------------------
-    def _find_ref_path(self, target_name: str) -> Optional[str]:
-        for ext in (".png", ".jpg", ".jpeg"):
-            path = os.path.join(self.refs_dir, f"{target_name}{ext}")
-            if os.path.isfile(path):
-                return path
-            path = os.path.join(self.refs_dir, target_name, f"{target_name}{ext}")
-            if os.path.isfile(path):
-                return path
+    @classmethod
+    def _canonical_name(cls, value: str) -> Optional[str]:
+        key = value.strip().lower()
+        if key in cls._ALIASES:
+            return cls._ALIASES[key]
+        if key in cls._ALLOWED_CLASS_NAMES:
+            return key
         return None
 
-    def _load_ref(self, target_name: str):
-        if target_name in self._ref_cache:
-            return self._ref_cache[target_name]
+    def _resolve_allowed_class_ids(self) -> List[int]:
+        allowed = []
+        if isinstance(self.model_names, dict):
+            name_items = self.model_names.items()
+        else:
+            name_items = enumerate(self.model_names)
 
-        path = self._find_ref_path(target_name)
-        if path is None:
-            self._ref_cache[target_name] = None
-            return None
+        for class_id, name in name_items:
+            canonical = self._canonical_name(str(name))
+            if canonical in self._ALLOWED_CLASS_NAMES:
+                allowed.append(int(class_id))
+        return allowed
 
-        img = cv2.imread(path)
-        if img is None:
-            self._ref_cache[target_name] = None
-            return None
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        kp, desc = self.akaze.detectAndCompute(gray, None)
-        if desc is None or len(kp) < 4:
-            kp, desc = self.orb.detectAndCompute(gray, None)
-
-        if desc is None or len(kp) < 4:
-            self._ref_cache[target_name] = None
-            return None
-
-        entry = {
-            "kp": kp,
-            "desc": desc,
-            "shape": img.shape[:2],
-            "path": path,
-        }
-        self._ref_cache[target_name] = entry
-        return entry
-
-    # ------------------------------------------------------------------
-    # Detection
-    # ------------------------------------------------------------------
     def detect(self, image_rgb: np.ndarray, target_name: str) -> List[Detection]:
-        ref = self._load_ref(target_name)
-        if ref is None:
+        canonical_target = self._canonical_name(target_name)
+        if canonical_target is None:
+            return []
+        if not self.allowed_class_ids:
             return []
 
-        ref_kp = ref["kp"]
-        ref_desc = ref["desc"]
-        ref_h, ref_w = ref["shape"]
-
-        gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-        kp, desc = self.akaze.detectAndCompute(gray, None)
-
-        if desc is None or len(kp) < self.min_matches:
-            kp, desc = self.orb.detectAndCompute(gray, None)
-            if desc is None or len(kp) < self.min_matches:
-                return []
-
-        if ref_desc.dtype != desc.dtype:
-            return []
-
-        try:
-            raw_matches = self.bf_hamming.knnMatch(ref_desc, desc, k=2)
-        except cv2.error:
-            return []
-
-        good = []
-        for m_n in raw_matches:
-            if len(m_n) == 2:
-                m, n = m_n
-                if m.distance < self.lowe_ratio * n.distance:
-                    good.append(m)
-
-        if len(good) < self.min_matches:
-            return []
-
-        src_pts = np.float32(
-            [ref_kp[m.queryIdx].pt for m in good]
-        ).reshape(-1, 1, 2)
-        dst_pts = np.float32(
-            [kp[m.trainIdx].pt for m in good]
-        ).reshape(-1, 1, 2)
-
-        H, mask = cv2.findHomography(
-            src_pts, dst_pts, cv2.RANSAC, self.ransac_reproj_threshold
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        results = self.model.predict(
+            source=image_bgr,
+            conf=self.conf_threshold,
+            iou=self.iou_threshold,
+            imgsz=self.imgsz,
+            classes=self.allowed_class_ids,
+            device=self.device,
+            verbose=False,
         )
-        if H is None or mask is None:
+
+        if not results:
             return []
 
-        num_inliers = int(mask.sum())
-        if num_inliers < self.min_inliers:
-            return []
-
-        corners_ref = np.float32(
-            [[0, 0], [ref_w, 0], [ref_w, ref_h], [0, ref_h]]
-        ).reshape(-1, 1, 2)
-
-        try:
-            projected = cv2.perspectiveTransform(corners_ref, H)
-        except cv2.error:
-            return []
-
-        polygon = projected.reshape(-1, 2)
-
-        poly_area = cv2.contourArea(polygon.astype(np.float32))
-        if poly_area < self.min_bbox_area:
-            return []
-
-        if not _is_convex_enough(polygon):
+        result = results[0]
+        if result.boxes is None:
             return []
 
         img_h, img_w = image_rgb.shape[:2]
-        x_min = max(0, int(polygon[:, 0].min()))
-        y_min = max(0, int(polygon[:, 1].min()))
-        x_max = min(img_w, int(polygon[:, 0].max()))
-        y_max = min(img_h, int(polygon[:, 1].max()))
+        detections: List[Detection] = []
+        for box in result.boxes:
+            cls_tensor = box.cls
+            conf_tensor = box.conf
+            xyxy_tensor = box.xyxy
+            if cls_tensor is None or conf_tensor is None or xyxy_tensor is None:
+                continue
 
-        bbox_area = (x_max - x_min) * (y_max - y_min)
-        if bbox_area < self.min_bbox_area:
-            return []
+            class_id = int(cls_tensor.item())
+            class_name = str(self.model_names[class_id])
+            canonical = self._canonical_name(class_name)
+            if canonical != canonical_target:
+                continue
 
-        img_area = img_h * img_w
-        if bbox_area > img_area * 0.55:
-            return []
+            x1, y1, x2, y2 = xyxy_tensor[0].cpu().numpy().tolist()
+            x_min = max(0, min(int(x1), img_w))
+            y_min = max(0, min(int(y1), img_h))
+            x_max = max(0, min(int(x2), img_w))
+            y_max = max(0, min(int(y2), img_h))
 
-        bbox_w = x_max - x_min
-        bbox_h = y_max - y_min
-        if bbox_w > img_w * 0.80 or bbox_h > img_h * 0.80:
-            return []
-        aspect = max(bbox_w, bbox_h) / max(min(bbox_w, bbox_h), 1)
-        if aspect > 5.0:
-            return []
+            if x_max <= x_min or y_max <= y_min:
+                continue
 
-        inlier_ratio = num_inliers / max(len(good), 1)
-        normalized = min(1.0, num_inliers / 20.0)
-        score = inlier_ratio * normalized
+            bbox_area = (x_max - x_min) * (y_max - y_min)
+            if bbox_area < self.min_bbox_area:
+                continue
 
-        det = Detection(
-            class_name=target_name,
-            score=score,
-            bbox_xyxy=(x_min, y_min, x_max, y_max),
-            polygon_xy=polygon.tolist(),
-            num_matches=len(good),
-            num_inliers=num_inliers,
-        )
-        return [det]
+            score = float(conf_tensor.item())
+            detections.append(
+                Detection(
+                    class_name=canonical,
+                    score=score,
+                    bbox_xyxy=(x_min, y_min, x_max, y_max),
+                    polygon_xy=None,
+                    num_matches=0,
+                    num_inliers=0,
+                )
+            )
+
+        detections.sort(key=lambda d: d.score, reverse=True)
+        return detections
 
     # ------------------------------------------------------------------
     # Debug visualization
@@ -227,20 +180,3 @@ class ReferenceImageDetectorBackend:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1,
             )
         return vis
-
-
-def _is_convex_enough(polygon: np.ndarray) -> bool:
-    """Reject self-intersecting quadrilaterals from bad homographies."""
-    n = len(polygon)
-    if n < 3:
-        return False
-    cross_signs = []
-    for i in range(n):
-        a = polygon[(i + 1) % n] - polygon[i]
-        b = polygon[(i + 2) % n] - polygon[(i + 1) % n]
-        cross = a[0] * b[1] - a[1] * b[0]
-        if abs(cross) > 1e-6:
-            cross_signs.append(cross > 0)
-    if not cross_signs:
-        return False
-    return all(s == cross_signs[0] for s in cross_signs)

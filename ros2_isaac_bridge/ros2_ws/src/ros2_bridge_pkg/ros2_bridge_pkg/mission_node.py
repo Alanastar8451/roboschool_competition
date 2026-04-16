@@ -75,6 +75,10 @@ class MissionNode(Node):
         self.declare_parameter("max_wz", 1.5)
         self.declare_parameter("min_detection_score", 0.12)
         self.declare_parameter("lost_timeout_s", 3.0)
+        self.declare_parameter("yolo_model_path", "yolo11n.pt")
+        self.declare_parameter("yolo_iou_threshold", 0.45)
+        self.declare_parameter("yolo_imgsz", 640)
+        self.declare_parameter("yolo_device", "cpu")
 
         self.refs_dir = self.get_parameter("refs_dir").value
         self.debug = self.get_parameter("debug").value
@@ -94,6 +98,10 @@ class MissionNode(Node):
         self.max_wz = self.get_parameter("max_wz").value
         self.min_score = self.get_parameter("min_detection_score").value
         self.lost_timeout = self.get_parameter("lost_timeout_s").value
+        self.yolo_model_path = self.get_parameter("yolo_model_path").value
+        self.yolo_iou_threshold = self.get_parameter("yolo_iou_threshold").value
+        self.yolo_imgsz = self.get_parameter("yolo_imgsz").value
+        self.yolo_device = self.get_parameter("yolo_device").value
 
         if not self.refs_dir:
             for candidate in [
@@ -112,10 +120,12 @@ class MissionNode(Node):
         # ---- Detector ----
         self.detector = ReferenceImageDetectorBackend(
             refs_dir=self.refs_dir,
-            min_matches=10,
-            min_inliers=8,
-            ransac_reproj_threshold=4.0,
+            model_path=self.yolo_model_path,
+            conf_threshold=self.min_score,
+            iou_threshold=self.yolo_iou_threshold,
             min_bbox_area=600,
+            imgsz=self.yolo_imgsz,
+            device=self.yolo_device,
             debug_visualization=self.debug,
         )
 

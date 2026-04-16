@@ -11,7 +11,10 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'ultralytics>=8.0.0,<9.0.0',
+    ],
     zip_safe=True,
     maintainer='ammar',
     maintainer_email='ammar.issa.500@gmail.com',
