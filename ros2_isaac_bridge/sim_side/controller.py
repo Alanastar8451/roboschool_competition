@@ -101,7 +101,8 @@ class HLInterfaceController(Node):
         # ---------------- Demo behavior ----------------
         self.command_duration = 2.0
         self.last_command_change_time = self._now_sec()
-        self.current_demo_cmd = {"vx": 0.0, "vy": 0.0, "wz": 0.0}
+        self.current_demo_cmd = {"vx": 2.0, "vy": 0.0, "wz": 0.0} #
+        print("ros2 Hello")
         self.demo_enabled = True
 
         self.log_period = 1.0

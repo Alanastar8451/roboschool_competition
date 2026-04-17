@@ -14,7 +14,7 @@ import torch
 from aliengo_gym import MINI_GYM_ROOT_DIR
 from aliengo_gym.envs.base.base_task import BaseTask
 from aliengo_gym.utils.math_utils import quat_apply_yaw, wrap_to_pi, get_scale_shift
-from aliengo_gym.utils.roboschool_terrain import Terrain
+from aliengo_gym.utils.roboschool_test_terrain import Terrain
 from .legged_robot_config import Cfg
 
 

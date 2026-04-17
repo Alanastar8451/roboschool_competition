@@ -46,6 +46,7 @@ box = None
 FLAG = 'walk'
 timestamp = None
 stuck_timer = None
+random_timer = None
 
 def get_found_object_id(
     current_state,
@@ -290,7 +291,8 @@ def run(
     camera_depth_max_m: float = 4.0,
     seed: int = 0,
 ) -> None:
-    global FLAG, box, timestamp, stuck_timer
+    global FLAG, box, timestamp, stuck_timer, random_timer
+    random_timer = time.time()
 
     robot.reset()
     env = getattr(robot, "env", None)
@@ -451,7 +453,9 @@ def run(
                 if (center_depth < 1
                   # and center_left_depth < 1
                 ):
-                  if center_left_depth < center_right_depth:
+                #   if center_left_depth < center_right_depth:
+                #   print(int(time.time() - random_timer) % 300 < 150, int(time.time() - random_timer) % 300, int(time.time() - random_timer))
+                  if int(time.time() - random_timer) % 300 < 150:
                     vw = -2.0
                   else:
                     vw = 2.0
@@ -489,8 +493,9 @@ def run(
             elif FLAG == 'unstuck':
                 vx = -1.5
 
-            if center_depth > 0.5 or stuck_timer is None:
+            if center_depth > 0.5 or stuck_timer is None or time.time() - stuck_timer > 60:
                 stuck_timer = time.time()
+                FLAG = 'walk'
 
             if time.time() - stuck_timer > 15:
                 FLAG = 'unstuck'
