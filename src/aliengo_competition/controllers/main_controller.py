@@ -290,7 +290,7 @@ def run(
     camera_depth_max_m: float = 4.0,
     seed: int = 0,
 ) -> None:
-    global FLAG, box, timestamp
+    global FLAG, box, timestamp, stuck_timer
 
     robot.reset()
     env = getattr(robot, "env", None)
